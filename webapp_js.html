@@ -1,0 +1,892 @@
+<script>
+let allSets = [];
+let filteredSets = [];
+let currentView = 'card';
+let expandedRowSetId = null;
+
+const filters = {
+  search:   '',
+  theme:    '',
+  subtheme: '',
+  priority: '',
+  owned:    'all'
+};
+
+let sortField = 'priority';
+let sortAsc = true;
+
+document.addEventListener('DOMContentLoaded', () => {
+  google.script.run
+    .withSuccessHandler(onDataLoaded)
+    .withFailureHandler(onDataError)
+    .webAppGetAllSets();
+
+  const addSearchBtn = document.getElementById('add-search-btn');
+  const addSearchInput = document.getElementById('add-search-input');
+  const addPriority = document.getElementById('add-form-priority');
+  const addSubmit = document.getElementById('add-form-submit');
+  const addCancel = document.getElementById('add-form-cancel');
+
+  addSearchBtn.addEventListener('click', initiateAddSearch);
+  addSearchInput.addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') initiateAddSearch();
+  });
+
+  addPriority.addEventListener('change', () => {
+    addSubmit.disabled = !addPriority.value;
+  });
+
+  addCancel.addEventListener('click', resetAddPage);
+  addSubmit.addEventListener('click', submitAddForm);
+});
+
+function onDataLoaded(data) {
+  if (data && data.error) {
+    document.getElementById('loading-message').textContent = "Error: " + data.error;
+    return;
+  }
+  allSets = data;
+  populateFilterDropdowns();
+  applyFilters();
+  updateNavStats();
+  renderRetirementStrip();
+  hideLoadingOverlay();
+  registerEventListeners();
+}
+
+function onDataError(error) {
+  document.getElementById('loading-message').textContent = "Failed to load wishlist. Please refresh.";
+}
+
+function hideLoadingOverlay() {
+  document.getElementById('loading-overlay').classList.add('hidden');
+}
+
+function populateFilterDropdowns() {
+  const themeSelect = document.getElementById('filter-theme');
+  const themes = new Set();
+  allSets.forEach(s => { if (s.theme) themes.add(s.theme); });
+  
+  Array.from(themes).sort().forEach(t => {
+    const opt = document.createElement('option');
+    opt.value = t;
+    opt.textContent = t;
+    themeSelect.appendChild(opt);
+  });
+  repopulateSubthemes();
+}
+
+function repopulateSubthemes() {
+  const subSelect = document.getElementById('filter-subtheme');
+  subSelect.innerHTML = '<option value="">All subthemes</option>';
+  
+  const subthemes = new Set();
+  allSets.forEach(s => {
+    if (s.subtheme) {
+      if (!filters.theme || s.theme === filters.theme) {
+        subthemes.add(s.subtheme);
+      }
+    }
+  });
+
+  Array.from(subthemes).sort().forEach(st => {
+    const opt = document.createElement('option');
+    opt.value = st;
+    opt.textContent = st;
+    subSelect.appendChild(opt);
+  });
+  subSelect.value = '';
+  filters.subtheme = '';
+}
+
+function applyFilters() {
+  filteredSets = allSets.filter(set => {
+    if (filters.search) {
+      const q = filters.search.toLowerCase();
+      const matchId = set.setId.toLowerCase().includes(q);
+      const matchName = set.setName.toLowerCase().includes(q);
+      if (!matchId && !matchName) return false;
+    }
+    if (filters.theme && set.theme !== filters.theme) return false;
+    if (filters.subtheme && set.subtheme !== filters.subtheme) return false;
+    if (filters.priority && String(set.priority) !== filters.priority) return false;
+
+    const qty = typeof set.ownedQty === 'number' ? set.ownedQty : 0;
+    if (filters.owned === 'hide' && qty > 0) return false;
+    if (filters.owned === 'only' && qty === 0) return false;
+
+    return true;
+  });
+
+  applySort();
+  renderCurrentView();
+  updateResultsCount();
+}
+
+function applySort() {
+  filteredSets.sort((a, b) => {
+    let valA = a[sortField];
+    let valB = b[sortField];
+
+    const emptyA = valA === '' || valA === null || valA === undefined;
+    const emptyB = valB === '' || valB === null || valB === undefined;
+    if (emptyA && emptyB) return 0;
+    if (emptyA) return 1;
+    if (emptyB) return -1;
+
+    if (typeof valA === 'string') {
+      valA = valA.toLowerCase();
+      valB = valB.toLowerCase();
+    }
+
+    if (valA < valB) return sortAsc ? -1 : 1;
+    if (valA > valB) return sortAsc ? 1 : -1;
+    return 0;
+  });
+}
+
+function getRetirementClass(retirementDateStr) {
+  if (!retirementDateStr) return '';
+  const now = new Date();
+  const retDate = new Date(retirementDateStr);
+  const daysUntil = (retDate - now) / 86400000;
+  if (daysUntil < 0) return 'retired';
+  if (daysUntil <= 90) return 'retiring-red';
+  if (daysUntil <= 180) return 'retiring-amber';
+  return '';
+}
+
+function formatRetirementDisplay(retirementDateStr) {
+  if (!retirementDateStr) return '';
+  const retDate = new Date(retirementDateStr);
+  const daysUntil = Math.ceil((retDate - new Date()) / 86400000);
+  const formatted = retDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (daysUntil < 0) return formatted + ' (retired)';
+  if (daysUntil <= 180) return formatted + ' (' + daysUntil + 'd)';
+  return formatted;
+}
+
+function isTargetPriceOverridden(set) {
+  if (typeof set.ukRrp !== 'number') return false;
+  if (typeof set.targetPrice !== 'number') return false;
+  const expected = Math.round(set.ukRrp * 0.75 * 100) / 100;
+  return Math.abs(set.targetPrice - expected) > 0.01;
+}
+
+function getTargetPriceClass(set) {
+  if (typeof set.ukRrp !== 'number') return 'price-no-rrp';
+  if (isTargetPriceOverridden(set)) return 'price-overridden';
+  return '';
+}
+
+function formatPrice(value) {
+  if (typeof value !== 'number') return '—';
+  return '£' + value.toFixed(2);
+}
+
+function renderCurrentView() {
+  if (currentView === 'card') {
+    renderCardView();
+  } else {
+    renderTableView();
+  }
+}
+
+function showEmptyState() {
+  document.getElementById('empty-state').classList.remove('hidden');
+  document.getElementById('view-card').classList.add('hidden');
+  document.getElementById('view-table').classList.add('hidden');
+}
+
+function hideEmptyState() {
+  document.getElementById('empty-state').classList.add('hidden');
+  if (currentView === 'card') {
+    document.getElementById('view-card').classList.remove('hidden');
+    document.getElementById('view-table').classList.add('hidden');
+  } else {
+    document.getElementById('view-table').classList.remove('hidden');
+    document.getElementById('view-card').classList.add('hidden');
+  }
+}
+
+function renderCardView() {
+  const container = document.getElementById('view-card');
+  container.innerHTML = '';
+
+  if (filteredSets.length === 0) {
+    showEmptyState();
+    return;
+  }
+  hideEmptyState();
+
+  filteredSets.forEach(set => {
+    container.appendChild(buildSetCard(set));
+  });
+}
+
+function buildSetCard(set) {
+  const card = document.createElement('div');
+  card.className = 'set-card';
+
+  let imgHtml = set.imageUrl 
+    ? `<img class="card-image" src="${set.imageUrl}" loading="lazy" alt="${set.setName}">` 
+    : `<div class="card-image-placeholder">No image</div>`;
+
+  const metaLine1 = set.theme + (set.subtheme ? ' — ' + set.subtheme : '');
+  const metaLine2 = set.year + ' · ' + set.pieces + ' pcs';
+  
+  const tpClass = getTargetPriceClass(set);
+  const retClass = getRetirementClass(set.retirementDate);
+  
+  let retHtml = '';
+  if (set.retirementDate) {
+    const prefix = retClass === 'retiring-red' ? '⚠ ' : '⏱ ';
+    retHtml = `<div class="card-retirement ${retClass}">${prefix}${formatRetirementDisplay(set.retirementDate)}</div>`;
+  }
+
+  let badgesHtml = `<div class="badge-priority" style="background-color: var(--priority-${set.priority})">P${set.priority}</div>`;
+  if (typeof set.ownedQty === 'number' && set.ownedQty > 0) {
+    badgesHtml += `<div class="badge-owned">Owned: ${set.ownedQty}</div>`;
+  }
+
+  const reasonHtml = set.reason ? `<div class="card-reason">${set.reason}</div>` : '';
+
+  card.innerHTML = `
+    ${imgHtml}
+    <div class="card-body">
+      <div class="card-set-id">${set.setId}</div>
+      <div class="card-set-name">${set.setName}</div>
+      <div class="card-meta">
+        <div>${metaLine1}</div>
+        <div>${metaLine2}</div>
+      </div>
+      <div class="card-pricing">
+        <div class="card-rrp">RRP ${formatPrice(set.ukRrp)}</div>
+        <div class="card-target display-target-price ${tpClass}" data-setid="${set.setId}">${formatPrice(set.targetPrice)}</div>
+      </div>
+      ${retHtml}
+      <div class="card-badges">${badgesHtml}</div>
+      ${reasonHtml}
+      <button class="card-edit-toggle">Edit ▾</button>
+      <div class="card-edit-panel hidden"></div>
+    </div>
+  `;
+
+  const editToggle = card.querySelector('.card-edit-toggle');
+  const editPanel = card.querySelector('.card-edit-panel');
+  editPanel.appendChild(buildEditPanel(set));
+
+  editToggle.addEventListener('click', () => {
+    editPanel.classList.toggle('hidden');
+    editToggle.textContent = editPanel.classList.contains('hidden') ? 'Edit ▾' : 'Close ▴';
+  });
+
+  return card;
+}
+
+function renderTableView() {
+  const tbody = document.getElementById('table-body');
+  tbody.innerHTML = '';
+  expandedRowSetId = null;
+
+  if (filteredSets.length === 0) {
+    showEmptyState();
+    return;
+  }
+  hideEmptyState();
+
+  filteredSets.forEach(set => {
+    tbody.appendChild(buildTableRow(set));
+  });
+}
+
+function buildTableRow(set) {
+  const tr = document.createElement('tr');
+  tr.style.cursor = 'pointer';
+
+  let imgHtml = set.imageUrl 
+    ? `<img class="table-thumb" src="${set.imageUrl}" loading="lazy" alt="">`
+    : `<div class="table-thumb" style="background:var(--bg-tertiary)"></div>`;
+
+  const piecesStr = set.pieces ? set.pieces.toLocaleString() : '—';
+  const ownedStr = (typeof set.ownedQty === 'number' && set.ownedQty > 0) ? set.ownedQty : '—';
+  const ownedClass = ownedStr !== '—' ? 'owned-positive' : '';
+
+  tr.innerHTML = `
+    <td>${imgHtml}</td>
+    <td class="table-set-id">${set.setId}</td>
+    <td class="table-set-name">${set.setName}</td>
+    <td>${set.theme}</td>
+    <td>${set.subtheme || '—'}</td>
+    <td>${set.year}</td>
+    <td>${piecesStr}</td>
+    <td>${formatPrice(set.ukRrp)}</td>
+    <td class="display-target-price ${getTargetPriceClass(set)}" data-setid="${set.setId}">${formatPrice(set.targetPrice)}</td>
+    <td class="${getRetirementClass(set.retirementDate)}">${formatRetirementDisplay(set.retirementDate) || '—'}</td>
+    <td>${set.priority}</td>
+    <td>${set.reason || '—'}</td>
+    <td class="${ownedClass}">${ownedStr}</td>
+  `;
+
+  tr.addEventListener('click', () => {
+    if (expandedRowSetId === set.setId) {
+      tr.nextElementSibling.remove();
+      expandedRowSetId = null;
+      return;
+    }
+
+    if (expandedRowSetId) {
+      const existing = document.querySelector('.table-expand-row');
+      if (existing) existing.remove();
+    }
+
+    const expandTr = document.createElement('tr');
+    expandTr.className = 'table-expand-row';
+    const td = document.createElement('td');
+    td.colSpan = 13;
+    td.appendChild(buildEditPanel(set));
+    expandTr.appendChild(td);
+    
+    tr.after(expandTr);
+    expandedRowSetId = set.setId;
+  });
+
+  return tr;
+}
+
+function buildEditPanel(set) {
+  const panel = document.createElement('div');
+  panel.className = 'edit-panel';
+
+  const helperText = typeof set.ukRrp === 'number' 
+    ? `Default: ${formatPrice(set.ukRrp * 0.75)} (75% RRP)` 
+    : `No RRP available`;
+
+  panel.innerHTML = `
+    <div class="edit-field">
+      <label>Priority</label>
+      <select class="edit-priority">
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+        <option value="4">4</option><option value="5">5</option>
+      </select>
+      <span class="edit-feedback pri-fb"></span>
+    </div>
+    <div class="edit-field">
+      <label>Target Price (£)</label>
+      <input type="number" class="edit-target" min="0" step="0.01" value="${typeof set.targetPrice === 'number' ? set.targetPrice : ''}">
+      <span style="font-size: 11px; color: var(--text-muted); margin-top: -3px;">${helperText}</span>
+      <span class="edit-feedback tar-fb"></span>
+    </div>
+    <div class="edit-field">
+      <label>Reason</label>
+      <input type="text" class="edit-reason" value="${set.reason || ''}">
+      <span class="edit-feedback rea-fb"></span>
+    </div>
+    
+    <div style="border-top: 1px solid var(--border-dark); padding-top: 8px; margin-top: 4px;">
+      <button class="btn-delete-set">Delete Set</button>
+    </div>
+  `;
+
+  const selPri = panel.querySelector('.edit-priority');
+  selPri.value = set.priority;
+  selPri.addEventListener('change', (e) => saveField(set.setId, 'priority', e.target.value, panel.querySelector('.pri-fb')));
+
+  const inpTar = panel.querySelector('.edit-target');
+  const handleTar = (e) => { saveField(set.setId, 'targetPrice', e.target.value, panel.querySelector('.tar-fb')); };
+  inpTar.addEventListener('blur', handleTar);
+  inpTar.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleTar(e); });
+
+  const inpRea = panel.querySelector('.edit-reason');
+  const handleRea = (e) => { saveField(set.setId, 'reason', e.target.value, panel.querySelector('.rea-fb')); };
+  inpRea.addEventListener('blur', handleRea);
+  inpRea.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleRea(e); });
+
+  const btnDelete = panel.querySelector('.btn-delete-set');
+  btnDelete.addEventListener('click', () => {
+    if (confirm(`Are you sure you want to permanently delete ${set.setId} - ${set.setName}?`)) {
+      btnDelete.textContent = 'Deleting...';
+      btnDelete.disabled = true;
+      
+      google.script.run
+        .withSuccessHandler((result) => {
+          if (result.success) {
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            google.script.run.withSuccessHandler(onDataLoaded).webAppGetAllSets();
+          } else {
+            alert('Error deleting set: ' + result.error);
+            btnDelete.textContent = 'Delete Set';
+            btnDelete.disabled = false;
+          }
+        })
+        .withFailureHandler((error) => {
+          alert('Failed to connect to server: ' + error.message);
+          btnDelete.textContent = 'Delete Set';
+          btnDelete.disabled = false;
+        })
+        .webAppDeleteSet(set.setId);
+    }
+  });
+
+  return panel;
+}
+
+function saveField(setId, colName, rawValue, feedbackEl) {
+  feedbackEl.textContent = 'Saving...';
+  feedbackEl.className = 'edit-feedback';
+
+  google.script.run
+    .withSuccessHandler((result) => {
+      if (result.success) {
+        feedbackEl.textContent = 'Saved ✓';
+        feedbackEl.className = 'edit-feedback saved';
+
+        let parsedValue = rawValue;
+        if (colName === 'priority') parsedValue = parseInt(rawValue, 10);
+        else if (colName === 'targetPrice') parsedValue = parseFloat(rawValue);
+
+        const updateSetObj = (s) => {
+          if (s && colName === 'priority') s.priority = parsedValue;
+          if (s && colName === 'targetPrice') s.targetPrice = parsedValue;
+          if (s && colName === 'reason') s.reason = rawValue;
+        };
+
+        const globalSet = allSets.find(s => s.setId === setId);
+        const viewSet = filteredSets.find(s => s.setId === setId);
+        updateSetObj(globalSet);
+        updateSetObj(viewSet);
+
+        if (colName === 'targetPrice') {
+          const els = document.querySelectorAll(`.display-target-price[data-setid="${setId}"]`);
+          els.forEach(el => {
+            el.textContent = formatPrice(parsedValue);
+            el.className = `display-target-price card-target ${getTargetPriceClass(globalSet)}`;
+          });
+        }
+
+        setTimeout(() => { feedbackEl.textContent = ''; }, 2500);
+      } else {
+        feedbackEl.textContent = 'Error: ' + result.error;
+        feedbackEl.className = 'edit-feedback error';
+      }
+    })
+    .withFailureHandler(() => {
+      feedbackEl.textContent = 'Save failed';
+      feedbackEl.className = 'edit-feedback error';
+    })
+    .webAppUpdateField(setId, colName, rawValue);
+}
+
+function updateNavStats() {
+  const count = allSets.length;
+  const totalRrp = allSets.reduce((sum, s) => sum + (typeof s.ukRrp === 'number' ? s.ukRrp : 0), 0);
+  document.getElementById('nav-total-count').textContent = count + (count === 1 ? ' set' : ' sets');
+  document.getElementById('nav-total-rrp').textContent = '£' + totalRrp.toFixed(2);
+}
+
+function updateResultsCount() {
+  const countEl = document.getElementById('results-count');
+  countEl.textContent = filteredSets.length === allSets.length 
+    ? `${allSets.length} sets` 
+    : `${filteredSets.length} of ${allSets.length} sets`;
+}
+
+function renderRetirementStrip() {
+  const strip = document.getElementById('retirement-strip');
+  const now = new Date();
+  const retiringSets = allSets.filter(s => {
+    if (!s.retirementDate) return false;
+    const days = (new Date(s.retirementDate) - now) / 86400000;
+    return days >= 0 && days <= 90;
+  });
+
+  if (retiringSets.length === 0) {
+    strip.classList.add('hidden');
+    return;
+  }
+
+  retiringSets.sort((a, b) => new Date(a.retirementDate) - new Date(b.retirementDate));
+  
+  const parts = retiringSets.map(s => {
+    const days = Math.ceil((new Date(s.retirementDate) - now) / 86400000);
+    return `${s.setName} · ${days}d`;
+  });
+
+  document.getElementById('retirement-strip-content').textContent = parts.join(', ');
+  strip.classList.remove('hidden');
+}
+
+function renderSummaryPage() {
+  const container = document.getElementById('summary-content');
+  container.innerHTML = '';
+
+  const totalRrp = allSets.reduce((acc, s) => acc + (typeof s.ukRrp === 'number' ? s.ukRrp : 0), 0);
+  const totalTarget = allSets.reduce((acc, s) => acc + (typeof s.targetPrice === 'number' ? s.targetPrice : 0), 0);
+  const avgDiscount = totalRrp > 0 ? (((totalRrp - totalTarget) / totalRrp) * 100).toFixed(1) + '%' : '—';
+
+  const b1 = document.createElement('div');
+  b1.className = 'summary-block';
+  b1.innerHTML = `<h2>Wishlist Overview</h2>
+    <div class="summary-stat"><span class="stat-label">Total sets</span><span class="stat-value">${allSets.length}</span></div>
+    <div class="summary-stat"><span class="stat-label">Total value at RRP</span><span class="stat-value">${formatPrice(totalRrp)}</span></div>
+    <div class="summary-stat"><span class="stat-label">Total at target</span><span class="stat-value">${formatPrice(totalTarget)}</span></div>
+    <div class="summary-stat"><span class="stat-label">Avg discount</span><span class="stat-value">${avgDiscount}</span></div>
+  `;
+  container.appendChild(b1);
+
+  const priCounts = {1:0, 2:0, 3:0, 4:0, 5:0};
+  allSets.forEach(s => { if (priCounts[s.priority] !== undefined) priCounts[s.priority]++; });
+  const maxPri = Math.max(...Object.values(priCounts));
+
+  let b2Html = `<h2>By Priority</h2>`;
+  for (let i=1; i<=5; i++) {
+    const pct = maxPri > 0 ? (priCounts[i] / maxPri * 100) : 0;
+    b2Html += `<div class="priority-bar-row">
+      <div class="priority-label">Priority ${i}</div>
+      <div class="priority-bar-track"><div class="priority-bar-fill" style="width: ${pct}%; background-color: var(--priority-${i})"></div></div>
+      <div class="priority-count">${priCounts[i]}</div>
+    </div>`;
+  }
+  const b2 = document.createElement('div'); b2.className = 'summary-block'; b2.innerHTML = b2Html;
+  container.appendChild(b2);
+
+  const themes = {};
+  allSets.forEach(s => {
+    if (!s.theme) return;
+    if (!themes[s.theme]) themes[s.theme] = { count: 0, rrp: 0 };
+    themes[s.theme].count++;
+    if (typeof s.ukRrp === 'number') themes[s.theme].rrp += s.ukRrp;
+  });
+  const themeArr = Object.entries(themes).sort((a, b) => b[1].count - a[1].count);
+
+  let b3Html = `<h2>By Theme</h2><table class="summary-table"><thead><tr><th>Theme</th><th>Sets</th><th>Total RRP</th></tr></thead><tbody>`;
+  themeArr.forEach(([tName, d]) => {
+    b3Html += `<tr><td>${tName}</td><td>${d.count}</td><td>${d.rrp > 0 ? formatPrice(d.rrp) : '—'}</td></tr>`;
+  });
+  b3Html += `</tbody></table>`;
+  const b3 = document.createElement('div'); b3.className = 'summary-block'; b3.innerHTML = b3Html;
+  container.appendChild(b3);
+
+  const retSets = allSets.filter(s => !!s.retirementDate).sort((a, b) => new Date(a.retirementDate) - new Date(b.retirementDate));
+  let b4Html = `<h2>Retirement Watch</h2>`;
+  if (retSets.length === 0) {
+    b4Html += `<p style="color:var(--text-muted)">No retirement dates recorded</p>`;
+  } else {
+    b4Html += `<table class="summary-table"><thead><tr><th>Set Name</th><th>Retires</th><th>Priority</th><th>RRP</th></tr></thead><tbody>`;
+    retSets.forEach(s => {
+      b4Html += `<tr><td>${s.setName}</td><td class="${getRetirementClass(s.retirementDate)}">${formatRetirementDisplay(s.retirementDate)}</td><td>${s.priority}</td><td>${formatPrice(s.ukRrp)}</td></tr>`;
+    });
+    b4Html += `</tbody></table>`;
+  }
+  const b4 = document.createElement('div'); b4.className = 'summary-block'; b4.innerHTML = b4Html;
+  container.appendChild(b4);
+}
+
+function registerEventListeners() {
+  document.querySelectorAll('.nav-link').forEach(link => {
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
+      e.target.classList.add('active');
+      const targetPage = e.target.getAttribute('data-page');
+      
+      document.querySelectorAll('.page').forEach(p => p.classList.add('hidden'));
+      document.getElementById('page-' + targetPage).classList.remove('hidden');
+      
+      if (targetPage === 'summary') renderSummaryPage();
+    });
+  });
+
+  document.getElementById('filter-search').addEventListener('input', (e) => { filters.search = e.target.value; applyFilters(); });
+  document.getElementById('filter-theme').addEventListener('change', (e) => { filters.theme = e.target.value; repopulateSubthemes(); applyFilters(); });
+  document.getElementById('filter-subtheme').addEventListener('change', (e) => { filters.subtheme = e.target.value; applyFilters(); });
+  document.getElementById('filter-priority').addEventListener('change', (e) => { filters.priority = e.target.value; applyFilters(); });
+  document.getElementById('filter-owned').addEventListener('change', (e) => { filters.owned = e.target.value; applyFilters(); });
+
+  document.getElementById('sort-field').addEventListener('change', (e) => { sortField = e.target.value; applyFilters(); });
+  const dirBtn = document.getElementById('sort-direction');
+  dirBtn.addEventListener('click', () => {
+    sortAsc = !sortAsc;
+    dirBtn.textContent = sortAsc ? '↑' : '↓';
+    applyFilters();
+  });
+
+  document.querySelectorAll('.view-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      if (btn.classList.contains('active')) return;
+      
+      if (btn.id === 'btn-export-ai') return; // Skip view logic for export button
+
+      document.querySelectorAll('.view-btn:not(#btn-export-ai)').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentView = btn.getAttribute('data-view');
+      document.getElementById('view-card').classList.toggle('hidden', currentView !== 'card');
+      document.getElementById('view-table').classList.toggle('hidden', currentView !== 'table');
+      expandedRowSetId = null;
+      renderCurrentView();
+    });
+  });
+
+  document.getElementById('btn-export-ai').addEventListener('click', () => {
+    if (filteredSets.length === 0) {
+      alert('No sets currently visible to export!');
+      return;
+    }
+
+    let exportText = "Here is my current LEGO wishlist. Please check the web for current pricing, discounts, and stock availability for these sets:\n\n";
+    
+    filteredSets.forEach(set => {
+      const rrp = typeof set.ukRrp === 'number' ? `£${set.ukRrp.toFixed(2)}` : 'N/A';
+      const target = typeof set.targetPrice === 'number' ? `£${set.targetPrice.toFixed(2)}` : 'N/A';
+      exportText += `- [${set.setId}] ${set.setName} | RRP: ${rrp} | My Target Price: ${target}\n`;
+    });
+
+    navigator.clipboard.writeText(exportText).then(() => {
+      alert('Wishlist copied to clipboard! You can now paste this directly into ChatGPT, Gemini, or Claude.');
+    }).catch(err => {
+      alert('Failed to copy to clipboard. Your browser may not support this feature.');
+    });
+  });
+}
+
+/* =========================================================================
+   ADD SET LOGIC
+========================================================================= */
+let addCurrentSet = {};
+
+function resetAddPage() {
+  document.getElementById('add-search-input').value = '';
+  document.getElementById('add-search-input').disabled = false;
+  document.getElementById('add-search-btn').disabled = false;
+  
+  document.getElementById('add-results').classList.add('hidden');
+  document.getElementById('add-detail-view').classList.add('hidden');
+  document.getElementById('add-feedback').classList.add('hidden');
+  document.getElementById('add-loading').classList.add('hidden');
+  
+  document.getElementById('add-form-priority').value = '';
+  document.getElementById('add-form-target').value = '';
+  document.getElementById('add-form-reason').value = '';
+  document.getElementById('add-form-submit').disabled = true;
+  
+  addCurrentSet = {};
+}
+
+function showAddFeedback(message, type) {
+  const fb = document.getElementById('add-feedback');
+  fb.textContent = message;
+  fb.className = 'summary-block';
+  fb.style.marginBottom = '16px';
+  fb.style.textAlign = 'center';
+  fb.style.fontWeight = '600';
+  
+  if (type === 'success') {
+    fb.style.background = 'var(--success-bg)';
+    fb.style.color = 'var(--success)';
+    fb.style.borderColor = '#c8e6c9';
+  } else {
+    fb.style.background = 'var(--error-bg)';
+    fb.style.color = 'var(--error-text)';
+    fb.style.borderColor = '#ffcdd2';
+  }
+  fb.classList.remove('hidden');
+}
+
+function initiateAddSearch() {
+  const query = document.getElementById('add-search-input').value.trim();
+  if (!query) return;
+
+  resetAddPage();
+  document.getElementById('add-search-input').value = query;
+  
+  document.getElementById('add-search-btn').disabled = true;
+  document.getElementById('add-search-input').disabled = true;
+  document.getElementById('add-loading').classList.remove('hidden');
+
+  google.script.run
+    .withSuccessHandler((result) => {
+      document.getElementById('add-loading').classList.add('hidden');
+      document.getElementById('add-search-btn').disabled = false;
+      document.getElementById('add-search-input').disabled = false;
+
+      if (!result.success) {
+        showAddFeedback(result.error, 'error');
+        return;
+      }
+
+      if (result.directHit) {
+        loadAddSetDetail(result.results[0]);
+      } else if (result.results.length === 0) {
+        showAddFeedback('No sets found. Try a different search.', 'error');
+      } else {
+        renderAddResults(result.results);
+      }
+    })
+    .withFailureHandler((error) => {
+      document.getElementById('add-loading').classList.add('hidden');
+      document.getElementById('add-search-btn').disabled = false;
+      document.getElementById('add-search-input').disabled = false;
+      showAddFeedback('Search failed. Please try again.', 'error');
+    })
+    .sidebarSearch(query);
+}
+
+function renderAddResults(results) {
+  const container = document.getElementById('add-results');
+  container.innerHTML = '';
+  
+  results.forEach(set => {
+    const row = document.createElement('div');
+    row.className = 'add-result-row';
+    
+    let imgHtml = set.imageUrl 
+      ? `<img src="${set.imageUrl}" class="add-result-thumb">` 
+      : `<div class="add-result-thumb" style="display:flex; align-items:center; justify-content:center; font-size:10px; color:var(--text-muted)">No img</div>`;
+      
+    row.innerHTML = `
+      ${imgHtml}
+      <div style="flex:1">
+        <div style="font-size:11px; color:var(--text-muted)">${set.setId}</div>
+        <div style="font-weight:600">${set.name}</div>
+        <div style="font-size:12px; color:var(--text-muted)">${set.theme} · ${set.year} · ${set.pieces} pcs</div>
+      </div>
+    `;
+    
+    row.addEventListener('click', () => loadAddSetDetail(set));
+    container.appendChild(row);
+  });
+  
+  container.classList.remove('hidden');
+}
+
+function loadAddSetDetail(setData) {
+  document.getElementById('add-results').classList.add('hidden');
+  document.getElementById('add-loading').textContent = 'Fetching Brickset data...';
+  document.getElementById('add-loading').classList.remove('hidden');
+  document.getElementById('add-feedback').classList.add('hidden');
+
+  google.script.run
+    .withSuccessHandler((result) => {
+      document.getElementById('add-loading').classList.add('hidden');
+      if (result.success) {
+        const merged = Object.assign({}, setData, result.data);
+        renderAddDetailAndForm(merged);
+      } else {
+        showAddFeedback(result.error, 'error');
+      }
+    })
+    .withFailureHandler(() => {
+      document.getElementById('add-loading').classList.add('hidden');
+      showAddFeedback('Failed to load set details.', 'error');
+    })
+    .sidebarGetSetDetail(setData.setId);
+}
+
+function renderAddDetailAndForm(set) {
+  addCurrentSet = set;
+  
+  const imgEl = document.getElementById('add-detail-image');
+  imgEl.src = set.imageUrl || '';
+  
+  document.getElementById('add-detail-id').textContent = set.setId;
+  document.getElementById('add-detail-name').textContent = set.name;
+  
+  let meta = set.theme;
+  if (set.subtheme) meta += ` — ${set.subtheme}`;
+  meta += `\n${set.year} · ${set.pieces} pcs`;
+  document.getElementById('add-detail-meta').innerText = meta;
+
+  document.getElementById('add-detail-rrp').textContent = typeof set.ukRrp === 'number' ? `£${set.ukRrp.toFixed(2)}` : 'Not available';
+  
+  const retEl = document.getElementById('add-detail-retires');
+  if (set.retirementDate) {
+    retEl.textContent = formatRetirementDisplay(set.retirementDate);
+    retEl.className = `stat-value ${getRetirementClass(set.retirementDate)}`;
+  } else {
+    retEl.textContent = 'Not listed';
+    retEl.className = 'stat-value';
+    retEl.style.color = 'var(--text-muted)';
+  }
+
+  const badgeOwned = document.getElementById('add-detail-owned');
+  if (set.ownedQty > 0) {
+    badgeOwned.textContent = `You own ${set.ownedQty}`;
+    badgeOwned.classList.remove('hidden');
+  } else {
+    badgeOwned.classList.add('hidden');
+  }
+
+  const warnEl = document.getElementById('add-detail-warning');
+  if (set.alreadyOnWishlist) {
+    warnEl.classList.remove('hidden');
+  } else {
+    warnEl.classList.add('hidden');
+  }
+
+  const targetHelp = document.getElementById('add-form-target-help');
+  const targetInput = document.getElementById('add-form-target');
+  
+  if (typeof set.ukRrp === 'number') {
+    const target = Math.round(set.ukRrp * 0.75 * 100) / 100;
+    targetInput.value = target;
+    targetHelp.textContent = `Default is 75% of RRP (£${set.ukRrp.toFixed(2)})`;
+  } else {
+    targetInput.value = '';
+    targetHelp.textContent = 'Enter your target price';
+  }
+
+  document.getElementById('add-detail-view').classList.remove('hidden');
+}
+
+function submitAddForm() {
+  const submitBtn = document.getElementById('add-form-submit');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Adding...';
+  
+  let targetPrice = null;
+  const targetVal = document.getElementById('add-form-target').value;
+  if (targetVal !== '') targetPrice = parseFloat(targetVal);
+
+  const setData = {
+    setId: addCurrentSet.setId,
+    name: addCurrentSet.name,
+    theme: addCurrentSet.theme,
+    subtheme: addCurrentSet.subtheme,
+    year: addCurrentSet.year,
+    pieces: addCurrentSet.pieces,
+    imageUrl: addCurrentSet.imageUrl,
+    ukRrp: addCurrentSet.ukRrp,
+    retirementDate: addCurrentSet.retirementDate,
+    targetPrice: targetPrice,
+    priority: parseInt(document.getElementById('add-form-priority').value, 10),
+    reason: document.getElementById('add-form-reason').value.trim()
+  };
+
+  google.script.run
+    .withSuccessHandler((result) => {
+      if (!result.success) {
+        showAddFeedback(result.error, 'error');
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Add to Wishlist';
+        return;
+      }
+      
+      showAddFeedback(result.message, 'success');
+      document.getElementById('add-detail-view').classList.add('hidden');
+      
+      google.script.run.withSuccessHandler(onDataLoaded).webAppGetAllSets();
+      
+      setTimeout(() => {
+        document.querySelector('.nav-link[data-page="wishlist"]').click();
+        resetAddPage();
+        submitBtn.textContent = 'Add to Wishlist';
+      }, 2000);
+    })
+    .withFailureHandler(() => {
+      showAddFeedback('Failed to add set. Please try again.', 'error');
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Add to Wishlist';
+    })
+    .sidebarAddSet(setData);
+}
+</script>
