@@ -1,0 +1,573 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <style>
+    :root {
+      --bg: #ffffff;
+      --bg-secondary: #f5f5f5;
+      --border: #e0e0e0;
+      --text: #1a1a1a;
+      --text-muted: #666666;
+      --accent: #006db7;
+      --success: #2e7d32;
+      --warning-bg: #fff8e1;
+      --warning-text: #e65100;
+      --error-bg: #ffebee;
+      --error-text: #c62828;
+      --amber: #f59e0b;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 13px;
+      color: var(--text);
+      background-color: var(--bg);
+      margin: 0;
+      padding: 12px;
+      box-sizing: border-box;
+    }
+
+    * { box-sizing: inherit; }
+
+    .hidden { display: none !important; }
+    
+    /* Layout */
+    .section-gap { margin-bottom: 8px; }
+    .section-border-top { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+
+    /* Forms & Controls */
+    input[type="text"], input[type="number"], select {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      font-size: 13px;
+      margin-bottom: 8px;
+      color: var(--text);
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    
+    label {
+      display: block;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+    
+    .helper-text {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: -4px;
+      margin-bottom: 8px;
+      display: block;
+    }
+
+    button {
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      background-color: var(--bg-secondary);
+      color: var(--text);
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .btn-primary {
+      background-color: var(--accent);
+      color: #fff;
+      border: none;
+      width: 100%;
+      padding: 10px;
+    }
+
+    .flex-row {
+      display: flex;
+      gap: 8px;
+    }
+    
+    /* Search Loading */
+    #search-loading {
+      text-align: center;
+      padding: 8px 0;
+      color: var(--text-muted);
+    }
+
+    /* Results */
+    .result-row {
+      display: flex;
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      align-items: center;
+      gap: 12px;
+    }
+    .result-row:hover {
+      background-color: var(--bg-secondary);
+    }
+    .result-row:last-child {
+      border-bottom: none;
+    }
+    .result-thumb {
+      width: 40px;
+      height: 40px;
+      object-fit: cover;
+      background-color: var(--border);
+      border-radius: 4px;
+      flex-shrink: 0;
+    }
+    .result-info {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .result-id { font-size: 11px; color: var(--text-muted); }
+    .result-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .result-meta { font-size: 11px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* Detail */
+    #detail-image-container {
+      width: 100%;
+      background-color: var(--bg-secondary);
+      border-radius: 4px;
+      margin-bottom: 12px;
+      text-align: center;
+    }
+    #detail-image {
+      max-width: 100%;
+      max-height: 180px;
+      object-fit: contain;
+      display: block;
+      margin: 0 auto;
+    }
+    .detail-id { font-size: 11px; color: var(--text-muted); }
+    .detail-name { font-size: 15px; font-weight: bold; margin: 4px 0; }
+    .detail-meta-text { font-size: 11px; color: var(--text-muted); margin-bottom: 8px; }
+    .detail-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+    .detail-label { font-weight: 500; }
+    
+    .badge-owned {
+      background-color: #e8f5e9;
+      color: var(--success);
+      padding: 4px 8px;
+      border-radius: 12px;
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 500;
+      margin-top: 8px;
+    }
+    
+    .banner-warning {
+      background-color: var(--warning-bg);
+      color: var(--warning-text);
+      padding: 8px;
+      border-radius: 4px;
+      font-weight: 500;
+      font-size: 12px;
+      margin-top: 8px;
+    }
+
+    /* Feedback */
+    #section-feedback {
+      padding: 8px 12px;
+      border-radius: 4px;
+      margin-top: 12px;
+      font-weight: 500;
+      text-align: center;
+    }
+    .feedback-success { background-color: #e8f5e9; color: var(--success); }
+    .feedback-error { background-color: var(--error-bg); color: var(--error-text); }
+  </style>
+</head>
+<body>
+
+  <!-- SEARCH SECTION -->
+  <div id="section-search" class="section-gap">
+    <div class="flex-row">
+      <input type="text" id="search-input" placeholder="Set number or name...">
+    </div>
+    <div class="flex-row">
+      <button id="search-btn" style="flex: 1;">Search</button>
+      <button id="clear-btn" class="hidden">Clear</button>
+    </div>
+  </div>
+
+  <!-- LOADING INDICATOR -->
+  <div id="search-loading" class="hidden">
+    <span>Loading...</span>
+  </div>
+
+  <!-- RESULTS SECTION -->
+  <div id="section-results" class="hidden section-border-top"></div>
+
+  <!-- DETAIL SECTION -->
+  <div id="section-detail" class="hidden section-border-top">
+    <div id="detail-image-container">
+      <img id="detail-image" src="" alt="Set Image">
+    </div>
+    <div id="detail-set-id" class="detail-id"></div>
+    <div id="detail-set-name" class="detail-name"></div>
+    <div id="detail-meta" class="detail-meta-text"></div>
+    
+    <div class="detail-row">
+      <span class="detail-label">UK RRP</span>
+      <span id="detail-rrp"></span>
+    </div>
+    <div class="detail-row">
+      <span class="detail-label">Retires</span>
+      <span id="detail-retirement"></span>
+    </div>
+    
+    <div id="detail-owned-badge" class="badge-owned hidden"></div>
+    <div id="detail-wishlist-warning" class="banner-warning hidden">⚠ This set is already on your wishlist</div>
+  </div>
+
+  <!-- ADD FORM SECTION -->
+  <div id="section-add-form" class="hidden section-border-top">
+    <label for="add-priority">Priority *</label>
+    <select id="add-priority">
+      <option value="">Select priority...</option>
+      <option value="1">1 — Highest</option>
+      <option value="2">2 — High</option>
+      <option value="3">3 — Medium</option>
+      <option value="4">4 — Low</option>
+      <option value="5">5 — Lowest</option>
+    </select>
+
+    <label for="add-reason">Reason for buying</label>
+    <input type="text" id="add-reason" placeholder="Optional">
+
+    <label for="add-target-price">Target price (£)</label>
+    <input type="number" id="add-target-price" min="0" step="0.01">
+    <span id="add-target-helper" class="helper-text">Enter your target price</span>
+
+    <button id="add-btn" class="btn-primary" disabled>Add to Wishlist</button>
+  </div>
+
+  <!-- FEEDBACK SECTION -->
+  <div id="section-feedback" class="hidden"></div>
+
+  <script>
+    // Module-level state
+    let currentSet = {};
+
+    // DOM references
+    let searchInput, searchBtn, clearBtn, searchLoading;
+    let sectionResults, sectionDetail, sectionAddForm, sectionFeedback;
+    let addPriority, addReason, addTargetPrice, addTargetHelper, addBtn;
+
+    document.addEventListener('DOMContentLoaded', function() {
+      // Assign DOM references
+      searchInput = document.getElementById('search-input');
+      searchBtn = document.getElementById('search-btn');
+      clearBtn = document.getElementById('clear-btn');
+      searchLoading = document.getElementById('search-loading');
+      
+      sectionResults = document.getElementById('section-results');
+      sectionDetail = document.getElementById('section-detail');
+      sectionAddForm = document.getElementById('section-add-form');
+      sectionFeedback = document.getElementById('section-feedback');
+      
+      addPriority = document.getElementById('add-priority');
+      addReason = document.getElementById('add-reason');
+      addTargetPrice = document.getElementById('add-target-price');
+      addTargetHelper = document.getElementById('add-target-helper');
+      addBtn = document.getElementById('add-btn');
+
+      // Register event listeners
+      searchBtn.addEventListener('click', initiateSearch);
+      searchInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') initiateSearch();
+      });
+      clearBtn.addEventListener('click', resetSidebar);
+      
+      addPriority.addEventListener('change', function() {
+        addBtn.disabled = !addPriority.value;
+      });
+      
+      addBtn.addEventListener('click', submitAddForm);
+
+      // Focus search input
+      searchInput.focus();
+    });
+
+    // Utility functions
+    function showSection(el) { el.classList.remove('hidden'); }
+    function hideSection(el) { el.classList.add('hidden'); }
+    
+    function showFeedback(message, type) {
+      sectionFeedback.textContent = message;
+      sectionFeedback.className = '';
+      if (type === 'success') {
+        sectionFeedback.classList.add('feedback-success');
+      } else {
+        sectionFeedback.classList.add('feedback-error');
+      }
+      showSection(sectionFeedback);
+    }
+
+    function resetSidebar() {
+      searchInput.value = '';
+      searchInput.disabled = false;
+      searchBtn.disabled = false;
+      
+      hideSection(clearBtn);
+      hideSection(sectionResults);
+      sectionResults.innerHTML = '';
+      
+      hideSection(sectionDetail);
+      hideSection(sectionAddForm);
+      hideSection(sectionFeedback);
+      hideSection(searchLoading);
+      
+      addPriority.value = '';
+      addReason.value = '';
+      addTargetPrice.value = '';
+      addBtn.disabled = true;
+      
+      currentSet = {};
+      searchInput.focus();
+    }
+
+    // Core flow functions
+    function initiateSearch() {
+      const query = searchInput.value.trim();
+      if (!query) return;
+
+      searchBtn.disabled = true;
+      searchInput.disabled = true;
+      showSection(searchLoading);
+      
+      hideSection(sectionResults);
+      hideSection(sectionDetail);
+      hideSection(sectionAddForm);
+      hideSection(sectionFeedback);
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (!result.success) {
+            showFeedback(result.error, 'error');
+            reEnableSearch();
+            return;
+          }
+
+          if (result.directHit) {
+            loadSetDetail(result.results[0]);
+          } else if (result.results.length === 0) {
+            showFeedback('No sets found — try a different search', 'error');
+            reEnableSearch();
+          } else {
+            renderResultsList(result.results);
+            showSection(sectionResults);
+            showSection(clearBtn);
+            reEnableSearch();
+            hideSection(searchLoading);
+          }
+        })
+        .withFailureHandler(function(error) {
+          showFeedback('Search failed — please try again', 'error');
+          reEnableSearch();
+          hideSection(searchLoading);
+        })
+        .sidebarSearch(query);
+    }
+    
+    function reEnableSearch() {
+      searchBtn.disabled = false;
+      searchInput.disabled = false;
+    }
+
+    function renderResultsList(results) {
+      sectionResults.innerHTML = '';
+      results.forEach(function(set) {
+        const row = document.createElement('div');
+        row.className = 'result-row';
+        
+        let imgHtml = '<div class="result-thumb"></div>';
+        if (set.imageUrl) {
+          imgHtml = `<img src="${set.imageUrl}" class="result-thumb" alt="Thumbnail">`;
+        }
+        
+        row.innerHTML = `
+          ${imgHtml}
+          <div class="result-info">
+            <div class="result-id">${set.setId}</div>
+            <div class="result-name">${set.name}</div>
+            <div class="result-meta">${set.theme} · ${set.year} · ${set.pieces} pcs</div>
+          </div>
+        `;
+        
+        row.addEventListener('click', function() {
+          loadSetDetail(set);
+        });
+        
+        sectionResults.appendChild(row);
+      });
+    }
+
+    function loadSetDetail(setData) {
+      hideSection(sectionResults);
+      showSection(searchLoading);
+      searchBtn.disabled = true;
+      searchInput.disabled = true;
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (result.success) {
+            const merged = Object.assign({}, setData, result.data);
+            renderDetail(merged);
+          } else {
+            showFeedback(result.error, 'error');
+            reEnableSearch();
+            hideSection(searchLoading);
+          }
+        })
+        .withFailureHandler(function(error) {
+          showFeedback('Could not load set details — please try again', 'error');
+          reEnableSearch();
+          hideSection(searchLoading);
+        })
+        .sidebarGetSetDetail(setData.setId);
+    }
+
+    function renderDetail(set) {
+      currentSet = set;
+      
+      // Image
+      const imgEl = document.getElementById('detail-image');
+      if (set.imageUrl) {
+        imgEl.src = set.imageUrl;
+        showSection(imgEl);
+      } else {
+        imgEl.src = '';
+        hideSection(imgEl);
+      }
+
+      // Basic Info
+      document.getElementById('detail-set-id').textContent = set.setId;
+      document.getElementById('detail-set-name').textContent = set.name;
+      
+      let metaText = `${set.theme}`;
+      if (set.subtheme) metaText += ` — ${set.subtheme}`;
+      metaText += `\n${set.year} · ${set.pieces} pcs`;
+      document.getElementById('detail-meta').innerText = metaText;
+
+      // UK RRP
+      const rrpEl = document.getElementById('detail-rrp');
+      if (typeof set.ukRrp === 'number') {
+        rrpEl.textContent = `£${set.ukRrp.toFixed(2)}`;
+        rrpEl.style.color = 'var(--text)';
+      } else {
+        rrpEl.textContent = 'Not available';
+        rrpEl.style.color = 'var(--text-muted)';
+      }
+
+      // Retirement Date
+      const retEl = document.getElementById('detail-retirement');
+      if (set.retirementDate) {
+        retEl.textContent = set.retirementDate;
+        retEl.style.color = 'var(--text)';
+        
+        // Calculate days difference
+        const today = new Date();
+        const retDate = new Date(set.retirementDate);
+        const daysDiff = (retDate - today) / (1000 * 60 * 60 * 24);
+        
+        if (daysDiff <= 90) {
+          retEl.textContent = `⚠ ${set.retirementDate}`;
+          retEl.style.color = 'var(--error-text)';
+        } else if (daysDiff <= 180) {
+          retEl.style.color = 'var(--amber)';
+        }
+      } else {
+        retEl.textContent = 'Not listed';
+        retEl.style.color = 'var(--text-muted)';
+      }
+
+      // Badges
+      const badgeEl = document.getElementById('detail-owned-badge');
+      if (set.ownedQty > 0) {
+        const copyText = set.ownedQty === 1 ? 'copy' : 'copies';
+        badgeEl.textContent = `You own ${set.ownedQty} ${copyText}`;
+        showSection(badgeEl);
+      } else {
+        hideSection(badgeEl);
+      }
+
+      const warnEl = document.getElementById('detail-wishlist-warning');
+      if (set.alreadyOnWishlist) {
+        showSection(warnEl);
+      } else {
+        hideSection(warnEl);
+      }
+
+      // Add Form Pre-fill
+      addTargetPrice.value = '';
+      if (typeof set.ukRrp === 'number') {
+        const target = Math.round(set.ukRrp * 0.75 * 100) / 100;
+        addTargetPrice.value = target;
+        addTargetHelper.textContent = `Default is 75% of RRP (£${set.ukRrp.toFixed(2)})`;
+      } else {
+        addTargetHelper.textContent = 'Enter your target price';
+      }
+
+      // Show final sections
+      hideSection(searchLoading);
+      showSection(sectionDetail);
+      showSection(sectionAddForm);
+      showSection(clearBtn);
+      reEnableSearch();
+    }
+
+    function submitAddForm() {
+      addBtn.disabled = true;
+      const priorityValue = addPriority.value;
+      if (!priorityValue) return; // Fallback check
+
+      let targetPrice = null;
+      if (addTargetPrice.value !== '') {
+        targetPrice = parseFloat(addTargetPrice.value);
+      }
+      
+      const setData = {
+        setId: currentSet.setId,
+        name: currentSet.name,
+        theme: currentSet.theme,
+        subtheme: currentSet.subtheme,
+        year: currentSet.year,
+        pieces: currentSet.pieces,
+        imageUrl: currentSet.imageUrl,
+        ukRrp: currentSet.ukRrp,
+        retirementDate: currentSet.retirementDate,
+        targetPrice: targetPrice,
+        priority: parseInt(priorityValue, 10),
+        reason: addReason.value.trim()
+      };
+
+      google.script.run
+        .withSuccessHandler(function(result) {
+          if (!result.success) {
+            showFeedback(result.error, 'error');
+            addBtn.disabled = false;
+            return;
+          }
+          
+          showFeedback(result.message, 'success');
+          setTimeout(resetSidebar, 2500);
+        })
+        .withFailureHandler(function(error) {
+          showFeedback('Failed to add set — please try again', 'error');
+          addBtn.disabled = false;
+        })
+        .sidebarAddSet(setData);
+    }
+  </script>
+</body>
+</html>
