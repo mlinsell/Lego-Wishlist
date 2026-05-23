@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <?!= include('webapp_css'); ?>
+</head>
+<body>
+
+  <nav id="app-nav">
+    <div id="nav-brand">LEGO Wishlist</div>
+    <div id="nav-links">
+      <a href="#" class="nav-link active" data-page="wishlist">Wishlist</a>
+      <a href="#" class="nav-link" data-page="summary">Summary</a>
+      <a href="#" class="nav-link btn-nav-add" data-page="add">+ Add Set</a>
+    </div>
+    <div id="nav-stats">
+      <span id="nav-total-count">— sets</span>
+      <span id="nav-total-rrp">£—</span>
+    </div>
+  </nav>
+
+  <div id="page-wishlist" class="page active">
+
+    <div id="retirement-strip" class="hidden">
+      <span class="strip-label">⚠ Retiring soon:</span>
+      <span id="retirement-strip-content"></span>
+    </div>
+
+    <div id="toolbar">
+      <input type="text" id="filter-search" placeholder="Search set number or name...">
+      <select id="filter-theme">
+        <option value="">All themes</option>
+      </select>
+      <select id="filter-subtheme">
+        <option value="">All subthemes</option>
+      </select>
+      <select id="filter-priority">
+        <option value="">All priorities</option>
+        <option value="1">Priority 1</option>
+        <option value="2">Priority 2</option>
+        <option value="3">Priority 3</option>
+        <option value="4">Priority 4</option>
+        <option value="5">Priority 5</option>
+      </select>
+      <select id="sort-field">
+        <option value="priority">Sort: Priority</option>
+        <option value="ukRrp">Sort: RRP</option>
+        <option value="targetPrice">Sort: Target Price</option>
+        <option value="retirementDate">Sort: Retirement</option>
+        <option value="year">Sort: Year</option>
+        <option value="pieces">Sort: Pieces</option>
+      </select>
+      <button id="sort-direction" title="Toggle sort direction">↑</button>
+      <div id="view-toggle">
+        <button class="view-btn active" data-view="card">Cards</button>
+        <button class="view-btn" data-view="table">Table</button>
+      </div>
+      
+      <button id="btn-export-ai" class="view-btn" style="color: var(--accent); font-weight: 600;">🤖 Copy for AI</button>
+      
+      <select id="filter-owned">
+        <option value="all">All sets</option>
+        <option value="hide">Hide owned</option>
+        <option value="only">Only owned</option>
+      </select>
+    </div>
+
+    <div id="results-count"></div>
+
+    <div id="view-card" class="view-container"></div>
+
+    <div id="view-table" class="view-container hidden">
+      <table id="sets-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Set ID</th>
+            <th>Name</th>
+            <th>Theme</th>
+            <th>Subtheme</th>
+            <th>Year</th>
+            <th>Pieces</th>
+            <th>RRP</th>
+            <th>Target</th>
+            <th>Retires</th>
+            <th>Priority</th>
+            <th>Reason</th>
+            <th>Owned</th>
+          </tr>
+        </thead>
+        <tbody id="table-body"></tbody>
+      </table>
+    </div>
+
+    <div id="empty-state" class="hidden">
+      <p>No sets match the current filters.</p>
+    </div>
+
+  </div>
+
+  <div id="page-summary" class="page hidden">
+    <div id="summary-content"></div>
+  </div>
+
+  <div id="page-add" class="page hidden">
+    <div class="add-container">
+      <h2>Add to Wishlist</h2>
+      
+      <div class="add-search-box">
+        <input type="text" id="add-search-input" placeholder="Enter set number or name...">
+        <button id="add-search-btn" class="btn-primary" style="width: auto; padding: 0 24px;">Search</button>
+      </div>
+      
+      <div id="add-loading" class="hidden" style="text-align: center; color: var(--text-muted); padding: 20px;">
+        Searching...
+      </div>
+      
+      <div id="add-feedback" class="hidden"></div>
+
+      <div id="add-results" class="hidden"></div>
+
+      <div id="add-detail-view" class="hidden add-split-view">
+        
+        <div class="add-split-left">
+          <div class="add-image-container">
+            <img id="add-detail-image" src="" alt="Set Image">
+          </div>
+          <div id="add-detail-id" class="detail-id" style="margin-top: 12px;"></div>
+          <div id="add-detail-name" class="detail-name" style="font-size: 18px;"></div>
+          <div id="add-detail-meta" class="detail-meta-text" style="margin-bottom: 16px;"></div>
+          
+          <div class="summary-stat">
+            <span class="stat-label">UK RRP</span>
+            <span id="add-detail-rrp" class="stat-value"></span>
+          </div>
+          <div class="summary-stat">
+            <span class="stat-label">Retires</span>
+            <span id="add-detail-retires" class="stat-value"></span>
+          </div>
+          
+          <div id="add-detail-owned" class="badge-owned hidden" style="margin-top: 16px; font-size: 13px;"></div>
+          <div id="add-detail-warning" class="banner-warning hidden" style="margin-top: 12px;">⚠ Already on wishlist</div>
+        </div>
+
+        <div class="add-split-right">
+          <h3>Set Details</h3>
+          
+          <div class="edit-field">
+            <label>Priority *</label>
+            <select id="add-form-priority" style="height: 38px;">
+              <option value="">Select priority...</option>
+              <option value="1">1 — Highest</option>
+              <option value="2">2 — High</option>
+              <option value="3">3 — Medium</option>
+              <option value="4">4 — Low</option>
+              <option value="5">5 — Lowest</option>
+            </select>
+          </div>
+
+          <div class="edit-field">
+            <label>Target Price (£)</label>
+            <input type="number" id="add-form-target" min="0" step="0.01" style="height: 38px;">
+            <span id="add-form-target-help" style="font-size: 11px; color: var(--text-muted); margin-top: -3px;"></span>
+          </div>
+
+          <div class="edit-field">
+            <label>Reason for buying</label>
+            <input type="text" id="add-form-reason" placeholder="Optional" style="height: 38px;">
+          </div>
+
+          <div class="add-form-actions">
+            <button id="add-form-cancel" style="flex: 1; padding: 10px;">Cancel</button>
+            <button id="add-form-submit" class="btn-primary" style="flex: 2; padding: 10px;" disabled>Add to Wishlist</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <div id="loading-overlay">
+    <div id="loading-message">Loading wishlist...</div>
+  </div>
+
+  <?!= include('webapp_js'); ?>
+
+</body>
+</html>
